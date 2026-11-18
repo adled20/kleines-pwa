@@ -1,0 +1,12 @@
+{
+  "name": "kleines-pwa",
+  "version": "1.0.0",
+  "description": "PWA Offline-First para gestión operativa, cartera informal y reabastecimiento en microcomercios",
+  "main": "app.js",
+  "scripts": {
+    "test": "jest --verbose"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
