@@ -9,6 +9,15 @@ function calcularTotalCarrito(carrito) {
   return carrito.reduce((acum, item) => acum + (Number(item.precio) * Number(item.cantidad)), 0);
 }
 
+function calcularVuelto(total, efectivoRecibido) {
+  const totalVenta = Number(total);
+  const recibido = Number(efectivoRecibido);
+  if (isNaN(recibido) || recibido < totalVenta) {
+    throw new Error('El efectivo recibido es insuficiente para cubrir el total de la venta.');
+  }
+  return recibido - totalVenta;
+}
+
 function detectarProductosBajosStock(productos) {
   return productos.filter(p => Number(p.stock) <= Number(p.umbralMinimo));
 }
@@ -102,6 +111,7 @@ function generarEnlaceWhatsAppCobro(cliente, nombreTienda = 'Tienda Don Carlos')
 
 const KleinesCore = {
   calcularTotalCarrito,
+  calcularVuelto,
   detectarProductosBajosStock,
   agruparPedidosPorProveedor,
   generarEnlaceWhatsAppProveedor,

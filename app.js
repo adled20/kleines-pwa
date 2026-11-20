@@ -1,3 +1,5 @@
+import { registrarVentaAtomicaFirestore } from './src/services/firebaseConfig.js';
+
 // Estado inicial precargado para demostración inmediata y persistencia en localStorage
 const STORAGE_KEY = 'kleines_mvp_state_v1';
 
@@ -66,7 +68,19 @@ function actualizarEstadoRed() {
 window.addEventListener('online', actualizarEstadoRed);
 window.addEventListener('offline', actualizarEstadoRed);
 
-// Carrito y Ventas (HU-04 y HU-06)
+// Buscador en tiempo real en Mostrador (HU-04)
+const inputBuscador = document.getElementById('buscarProductoMostrador');
+if (inputBuscador) {
+  inputBuscador.addEventListener('input', e => {
+    const termino = e.target.value.toLowerCase().trim();
+    const filtrados = state.productos.filter(p =>
+      p.nombre.toLowerCase().includes(termino)
+    );
+    renderProductosMostrador(filtrados);
+  });
+}
+
+// Carrito, Controles +/- y Calculadora de Vuelto (HU-04)
 function agregarAlCarrito(prodId) {
   const prod = state.productos.find(p => p.id === prodId);
   if (!prod || prod.stock <= 0) return alert('Producto sin existencias disponibles.');
@@ -80,8 +94,64 @@ function agregarAlCarrito(prodId) {
   renderCarrito();
 }
 
+function cambiarCantidadCarrito(prodId, delta) {
+  const item = state.carrito.find(i => i.id === prodId);
+  const prod = state.productos.find(p => p.id === prodId);
+  if (!item || !prod) return;
+
+  const nuevaCantidad = item.cantidad + delta;
+  if (nuevaCantidad <= 0) {
+    state.carrito = state.carrito.filter(i => i.id !== prodId);
+  } else if (nuevaCantidad > prod.stock) {
+    return alert(`Stock máximo disponible: ${prod.stock} unidades.`);
+  } else {
+    item.cantidad = nuevaCantidad;
+  }
+  renderCarrito();
+}
+
+function actualizarCalculadoraVuelto() {
+  const inputEfectivo = document.getElementById('efectivoRecibido');
+  const textoVuelto = document.getElementById('textoVuelto');
+  const btnContado = document.getElementById('btnCobrarContado');
+  if (!inputEfectivo || !textoVuelto || !btnContado) return;
+
+  const total = window.KleinesCore.calcularTotalCarrito(state.carrito);
+
+  if (total === 0) {
+    textoVuelto.textContent = 'Vuelto: $0';
+    textoVuelto.className = 'small fw-bold text-muted mb-2';
+    btnContado.disabled = true;
+    return;
+  }
+
+  if (inputEfectivo.value === '') {
+    textoVuelto.textContent = 'Digita el efectivo recibido para calcular el vuelto';
+    textoVuelto.className = 'small fw-semibold text-muted mb-2';
+    btnContado.disabled = true;
+    return;
+  }
+
+  try {
+    const vuelto = window.KleinesCore.calcularVuelto(total, Number(inputEfectivo.value));
+    textoVuelto.textContent = `Vuelto: ${formatoCOP(vuelto)}`;
+    textoVuelto.className = 'small fw-bold text-success mb-2';
+    btnContado.disabled = false;
+  } catch (err) {
+    textoVuelto.textContent = 'Efectivo insuficiente';
+    textoVuelto.className = 'small fw-bold text-danger mb-2';
+    btnContado.disabled = true;
+  }
+}
+
+const inputEfectivoRecibido = document.getElementById('efectivoRecibido');
+if (inputEfectivoRecibido) {
+  inputEfectivoRecibido.addEventListener('input', actualizarCalculadoraVuelto);
+}
+
 document.getElementById('btnVaciarCarrito').addEventListener('click', () => {
   state.carrito = [];
+  if (inputEfectivoRecibido) inputEfectivoRecibido.value = '';
   renderCarrito();
 });
 
@@ -90,6 +160,14 @@ function procesarVenta(tipo) {
   const total = window.KleinesCore.calcularTotalCarrito(state.carrito);
   const clienteId = document.getElementById('selectClienteVenta').value;
 
+  if (tipo === 'contado' && inputEfectivoRecibido) {
+    try {
+      window.KleinesCore.calcularVuelto(total, Number(inputEfectivoRecibido.value));
+    } catch (err) {
+      return alert('Efectivo insuficiente para completar el cobro de contado.');
+    }
+  }
+
   if (tipo === 'fiado') {
     if (!clienteId) return alert('Selecciona un cliente para registrar la venta fiada.');
     const cliente = state.clientes.find(c => c.id === clienteId);
@@ -97,27 +175,77 @@ function procesarVenta(tipo) {
     if (cliente.diasMora === 0) cliente.diasMora = 1;
   }
 
-  // Descuento atómico de stock
-  state.carrito.forEach(item => {
-    const prod = state.productos.find(p => p.id === item.id);
-    if (prod) prod.stock = Math.max(0, prod.stock - item.cantidad);
-  });
-
-  state.ventas.push({
+  const nuevaVenta = {
     id: 'v-' + Date.now(),
     tipo,
     total,
     clienteId: tipo === 'fiado' ? clienteId : null,
     fecha: new Date().toISOString()
+  };
+
+  const carritoCopia = state.carrito.map(item => ({ ...item }));
+
+  // Descuento local inmediato (dispara alertas HU-03 si stock <= umbralMinimo incluso offline)
+  state.carrito.forEach(item => {
+    const prod = state.productos.find(p => p.id === item.id);
+    if (prod) prod.stock = Math.max(0, prod.stock - item.cantidad);
   });
 
+  // Registro atómico en Cloud Firestore con cola offline (writeBatch)
+  registrarVentaAtomicaFirestore(nuevaVenta, carritoCopia).catch(err => {
+    console.warn('Operación encolada en caché local / pendiente de Firestore:', err.message);
+  });
+
+  state.ventas.push(nuevaVenta);
   state.carrito = [];
+  if (inputEfectivoRecibido) inputEfectivoRecibido.value = '';
+  if (inputBuscador) inputBuscador.value = '';
+
   saveState();
   alert(`Venta (${tipo.toUpperCase()}) registrada correctamente por ${formatoCOP(total)}.`);
 }
 
 document.getElementById('btnCobrarContado').addEventListener('click', () => procesarVenta('contado'));
 document.getElementById('btnCobrarFiado').addEventListener('click', () => procesarVenta('fiado'));
+
+// Detalle de Arqueo Diario de Caja (HU-05)
+const btnDetalleCierre = document.getElementById('btnDetalleCierre');
+if (btnDetalleCierre) {
+  btnDetalleCierre.addEventListener('click', () => {
+    const panel = document.getElementById('panelDetalleCierre');
+    if (!panel) return;
+    panel.classList.toggle('d-none');
+    renderDetalleCierre();
+  });
+}
+
+function renderDetalleCierre() {
+  const panel = document.getElementById('panelDetalleCierre');
+  if (!panel) return;
+
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const ventasHoy = state.ventas.filter(v => !v.fecha || v.fecha.startsWith(hoyISO));
+  const abonosHoy = state.abonos.filter(a => !a.fecha || a.fecha.startsWith(hoyISO));
+  const resumen = window.KleinesCore.calcularResumenCaja(ventasHoy, abonosHoy);
+  const fechaFormateada = new Date().toLocaleDateString('es-CO', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  panel.innerHTML = `
+    <div class="alert alert-light border shadow-sm mt-3 mb-0">
+      <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
+        <strong>📋 Arqueo Diario de Caja</strong>
+        <span class="badge bg-secondary">${fechaFormateada}</span>
+      </div>
+      <div class="row g-2 small">
+        <div class="col-sm-6">Ventas de Contado: <strong class="text-success">${formatoCOP(resumen.ventasContado)}</strong></div>
+        <div class="col-sm-6">Abonos Recibidos: <strong class="text-primary">${formatoCOP(resumen.totalAbonos)}</strong></div>
+        <div class="col-sm-6">Dinero Físico en Caja: <strong class="text-success fs-6">${formatoCOP(resumen.dineroFisicoEnCaja)}</strong></div>
+        <div class="col-sm-6">Créditos Otorgados (Fiado): <strong class="text-warning-emphasis">${formatoCOP(resumen.ventasFiado)}</strong></div>
+      </div>
+    </div>
+  `;
+}
 
 // Formularios de Proveedores, Productos y Clientes (HU-02 / HU-06)
 document.getElementById('formProveedor').addEventListener('submit', e => {
@@ -177,30 +305,20 @@ function registrarAbono(clienteId) {
   }
 }
 
-// Renderizado de toda la UI
-function renderCarrito() {
-  const ul = document.getElementById('listaCarrito');
-  ul.innerHTML = state.carrito.length === 0
-    ? '<li class="list-group-item text-muted text-center py-3">El carrito está vacío</li>'
-    : state.carrito.map(item => `
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-          <div><strong>${item.nombre}</strong><br><small class="text-muted">${item.cantidad} x ${formatoCOP(item.precio)}</small></div>
-          <span class="fw-semibold">${formatoCOP(item.precio * item.cantidad)}</span>
-        </li>
-      `).join('');
-  document.getElementById('totalCarrito').textContent = formatoCOP(window.KleinesCore.calcularTotalCarrito(state.carrito));
-}
+// Exponer funciones al ámbito global para eventos onclick del HTML al usar type="module"
+window.agregarAlCarrito = agregarAlCarrito;
+window.cambiarCantidadCarrito = cambiarCantidadCarrito;
+window.registrarAbono = registrarAbono;
 
-function renderAll() {
-  // 1. Resumen Caja (HU-05)
-  const resumen = window.KleinesCore.calcularResumenCaja(state.ventas, state.abonos);
-  document.getElementById('cajaEfectivo').textContent = formatoCOP(resumen.dineroFisicoEnCaja);
-  document.getElementById('cajaFiado').textContent = formatoCOP(resumen.ventasFiado);
-  document.getElementById('cajaTotal').textContent = formatoCOP(resumen.totalOperado);
-
-  // 2. Mostrador
+// Renderizado de Mostrador
+function renderProductosMostrador(lista = state.productos) {
   const grid = document.getElementById('gridProductosMostrador');
-  grid.innerHTML = state.productos.map(p => {
+  if (lista.length === 0) {
+    grid.innerHTML = '<div class="col-12 text-muted text-center py-3">No se encontraron productos con ese nombre.</div>';
+    return;
+  }
+
+  grid.innerHTML = lista.map(p => {
     const esBajo = p.stock <= p.umbralMinimo;
     return `
       <div class="col-sm-6">
@@ -214,12 +332,50 @@ function renderAll() {
           </div>
           <div class="d-flex justify-content-between align-items-center mt-3">
             <span class="fw-bold text-success">${formatoCOP(p.precio)}</span>
-            <button class="btn btn-sm btn-outline-success" onclick="agregarAlCarrito('${p.id}')">+ Agregar</button>
+            <button class="btn btn-sm btn-outline-success" onclick="agregarAlCarrito('${p.id}')" ${p.stock <= 0 ? 'disabled' : ''}>+ Agregar</button>
           </div>
         </div>
       </div>
     `;
   }).join('');
+}
+
+// Renderizado de Carrito con botones - y +
+function renderCarrito() {
+  const ul = document.getElementById('listaCarrito');
+  ul.innerHTML = state.carrito.length === 0
+    ? '<li class="list-group-item text-muted text-center py-3">El carrito está vacío</li>'
+    : state.carrito.map(item => `
+        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+          <div>
+            <strong>${item.nombre}</strong><br>
+            <small class="text-muted">${formatoCOP(item.precio)} c/u</small>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-secondary" onclick="cambiarCantidadCarrito('${item.id}', -1)">-</button>
+              <span class="btn btn-light disabled fw-bold text-dark">${item.cantidad}</span>
+              <button type="button" class="btn btn-outline-secondary" onclick="cambiarCantidadCarrito('${item.id}', 1)">+</button>
+            </div>
+            <span class="fw-semibold ms-1">${formatoCOP(item.precio * item.cantidad)}</span>
+          </div>
+        </li>
+      `).join('');
+
+  document.getElementById('totalCarrito').textContent = formatoCOP(window.KleinesCore.calcularTotalCarrito(state.carrito));
+  actualizarCalculadoraVuelto();
+}
+
+function renderAll() {
+  // 1. Resumen Caja (HU-05)
+  const resumen = window.KleinesCore.calcularResumenCaja(state.ventas, state.abonos);
+  document.getElementById('cajaEfectivo').textContent = formatoCOP(resumen.dineroFisicoEnCaja);
+  document.getElementById('cajaFiado').textContent = formatoCOP(resumen.ventasFiado);
+  document.getElementById('cajaTotal').textContent = formatoCOP(resumen.totalOperado);
+  renderDetalleCierre();
+
+  // 2. Mostrador
+  renderProductosMostrador(state.productos);
 
   // 3. Selectores de clientes y proveedores
   document.getElementById('selectClienteVenta').innerHTML =
