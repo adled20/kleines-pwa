@@ -1,7 +1,7 @@
 /**
  * Módulo Core de Kleines PWA
  * Contiene la lógica pura de ventas, alertas de stock bajo, agrupación por proveedores,
- * enlaces de WhatsApp, arqueo de caja y cobro a morosos.
+ * enlaces de WhatsApp, arqueo de caja, cartera y cobro a morosos.
  */
 
 function calcularTotalCarrito(carrito) {
@@ -93,7 +93,7 @@ function calcularResumenCaja(ventas, abonos) {
 function procesarAbonoCliente(saldoActual, montoAbono) {
   const saldo = Number(saldoActual);
   const abono = Number(montoAbono);
-  if (abono <= 0) throw new Error('El monto del abono debe ser mayor a cero.');
+  if (isNaN(abono) || abono <= 0) throw new Error('El monto del abono debe ser mayor a cero.');
   if (abono > saldo) throw new Error('El abono no puede superar la deuda actual del cliente.');
   return saldo - abono;
 }
@@ -109,6 +109,16 @@ function generarEnlaceWhatsAppCobro(cliente, nombreTienda = 'Tienda Don Carlos')
   return `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
 }
 
+function filtrarClientesMorosos(clientes, diasMinimos = 7) {
+  return (clientes || [])
+    .filter(
+      c =>
+        Number(c.saldoActual) > 0 &&
+        Number(c.diasMora || 0) >= Number(diasMinimos)
+    )
+    .sort((a, b) => Number(b.saldoActual) - Number(a.saldoActual));
+}
+
 const KleinesCore = {
   calcularTotalCarrito,
   calcularVuelto,
@@ -117,7 +127,8 @@ const KleinesCore = {
   generarEnlaceWhatsAppProveedor,
   calcularResumenCaja,
   procesarAbonoCliente,
-  generarEnlaceWhatsAppCobro
+  generarEnlaceWhatsAppCobro,
+  filtrarClientesMorosos
 };
 
 if (typeof window !== 'undefined') {

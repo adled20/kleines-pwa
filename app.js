@@ -1,4 +1,9 @@
 import { registrarVentaAtomicaFirestore } from './src/services/firebaseConfig.js';
+import {
+  registrarClienteFirestore,
+  registrarVentaFiadaAtomica,
+  registrarAbonoAtomico
+} from './src/services/carteraService.js';
 
 // Estado inicial precargado para demostración inmediata y persistencia en localStorage
 const STORAGE_KEY = 'kleines_mvp_state_v1';
@@ -15,9 +20,9 @@ const defaultState = {
     { id: 'p-4', nombre: 'Panela Redonda', precio: 2500, stock: 2, umbralMinimo: 5, proveedorId: 'prov-1' }
   ],
   clientes: [
-    { id: 'c-1', nombre: 'Jorge Eliécer Silva', telefono: '573007890123', saldoActual: 73000, diasMora: 12 },
-    { id: 'c-2', nombre: 'Ana María Pérez', telefono: '573109876543', saldoActual: 45000, diasMora: 3 },
-    { id: 'c-3', nombre: 'Luis Fernando Gómez', telefono: '573201234567', saldoActual: 0, diasMora: 0 }
+    { id: 'c-1', nombre: 'Jorge Eliécer Silva', telefono: '573007890123', saldoActual: 73000, diasMora: 12, consentimiento: true },
+    { id: 'c-2', nombre: 'Ana María Pérez', telefono: '573109876543', saldoActual: 45000, diasMora: 3, consentimiento: true },
+    { id: 'c-3', nombre: 'Luis Fernando Gómez', telefono: '573201234567', saldoActual: 0, diasMora: 0, consentimiento: true }
   ],
   ventas: [
     { id: 'v-1', tipo: 'contado', total: 42000, fecha: new Date().toISOString() },
@@ -30,6 +35,7 @@ const defaultState = {
 };
 
 let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState;
+let clienteHistorialActivoId = null;
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -175,15 +181,15 @@ function procesarVenta(tipo) {
     if (cliente.diasMora === 0) cliente.diasMora = 1;
   }
 
+  const carritoCopia = state.carrito.map(item => ({ ...item }));
   const nuevaVenta = {
     id: 'v-' + Date.now(),
     tipo,
     total,
     clienteId: tipo === 'fiado' ? clienteId : null,
+    items: carritoCopia,
     fecha: new Date().toISOString()
   };
-
-  const carritoCopia = state.carrito.map(item => ({ ...item }));
 
   // Descuento local inmediato (dispara alertas HU-03 si stock <= umbralMinimo incluso offline)
   state.carrito.forEach(item => {
@@ -191,10 +197,16 @@ function procesarVenta(tipo) {
     if (prod) prod.stock = Math.max(0, prod.stock - item.cantidad);
   });
 
-  // Registro atómico en Cloud Firestore con cola offline (writeBatch)
-  registrarVentaAtomicaFirestore(nuevaVenta, carritoCopia).catch(err => {
-    console.warn('Operación encolada en caché local / pendiente de Firestore:', err.message);
-  });
+  // Registro atómico en Cloud Firestore (writeBatch)
+  if (tipo === 'fiado') {
+    registrarVentaFiadaAtomica(nuevaVenta, carritoCopia).catch(err => {
+      console.warn('Venta fiada encolada en caché local / pendiente de Firestore:', err.message);
+    });
+  } else {
+    registrarVentaAtomicaFirestore(nuevaVenta, carritoCopia).catch(err => {
+      console.warn('Venta contado encolada en caché local / pendiente de Firestore:', err.message);
+    });
+  }
 
   state.ventas.push(nuevaVenta);
   state.carrito = [];
@@ -274,41 +286,205 @@ document.getElementById('formProducto').addEventListener('submit', e => {
   saveState();
 });
 
-document.getElementById('formCliente').addEventListener('submit', e => {
+document.getElementById('formCliente').addEventListener('submit', async e => {
   e.preventDefault();
-  state.clientes.push({
+  const nombre = document.getElementById('cliNombre').value.trim();
+  const telefono = document.getElementById('cliTelefono').value.trim();
+  const consentimiento = document.getElementById('cliConsentimiento').checked;
+  const errorBox = document.getElementById('errorConsentimiento');
+
+  if (!nombre || !telefono) {
+    alert('Por favor completa el nombre y el teléfono de WhatsApp del cliente.');
+    return;
+  }
+
+  // Validación estricta de Habeas Data (Ley 1581 de 2012 - HU-06 Escenario 1)
+  if (!consentimiento) {
+    const msg = 'Debe aceptar el consentimiento de datos (Ley 1581 de 2012).';
+    if (errorBox) {
+      errorBox.textContent = msg;
+      errorBox.classList.remove('d-none');
+    }
+    alert(msg);
+    return;
+  }
+
+  if (errorBox) {
+    errorBox.textContent = '';
+    errorBox.classList.add('d-none');
+  }
+
+  const nuevoCliente = {
     id: 'c-' + Date.now(),
-    nombre: document.getElementById('cliNombre').value.trim(),
-    telefono: document.getElementById('cliTelefono').value.trim(),
+    nombre,
+    telefono,
     saldoActual: 0,
-    diasMora: 0
+    diasMora: 0,
+    consentimiento: true
+  };
+
+  registrarClienteFirestore(nuevoCliente).catch(err => {
+    console.warn('Cliente encolado en caché local / pendiente de Firestore:', err.message);
   });
+
+  state.clientes.push(nuevoCliente);
   e.target.reset();
   saveState();
 });
 
-// Abonos a Morosos (HU-07)
+// Interruptor de filtro de morosos (HU-08)
+const chkSoloMorosos = document.getElementById('filtroSoloMorosos');
+if (chkSoloMorosos) {
+  chkSoloMorosos.addEventListener('change', () => {
+    renderAll();
+  });
+}
+
+// Abonos a Morosos (HU-07 Escenario 1 y 2)
 function registrarAbono(clienteId) {
   const cliente = state.clientes.find(c => c.id === clienteId);
   if (!cliente || cliente.saldoActual <= 0) return;
   const entrada = prompt(`Saldo actual de ${cliente.nombre}: ${formatoCOP(cliente.saldoActual)}\nIngresa el valor del abono:`);
-  if (!entrada) return;
+  if (entrada === null) return;
 
   try {
-    const nuevoSaldo = window.KleinesCore.procesarAbonoCliente(cliente.saldoActual, Number(entrada));
+    const montoAbono = Number(entrada);
+    const saldoAnterior = cliente.saldoActual;
+    const nuevoSaldo = window.KleinesCore.procesarAbonoCliente(saldoAnterior, montoAbono);
+
+    const nuevoAbono = {
+      id: 'a-' + Date.now(),
+      clienteId,
+      monto: montoAbono,
+      fecha: new Date().toISOString()
+    };
+
+    registrarAbonoAtomico({
+      ...nuevoAbono,
+      saldoActual: saldoAnterior
+    }).catch(err => {
+      console.warn('Abono inmutable encolado en caché local / pendiente de Firestore:', err.message);
+    });
+
     cliente.saldoActual = nuevoSaldo;
     if (nuevoSaldo === 0) cliente.diasMora = 0;
-    state.abonos.push({ id: 'a-' + Date.now(), clienteId, monto: Number(entrada), fecha: new Date().toISOString() });
+    state.abonos.push(nuevoAbono);
     saveState();
   } catch (err) {
     alert(err.message);
   }
 }
 
+// Historial Inmutable por Cliente (HU-07 Escenario 3)
+function formatearFechaMovimiento(isoString) {
+  if (!isoString) return 'Sin fecha';
+  const fecha = new Date(isoString);
+  if (isNaN(fecha.getTime())) return String(isoString);
+  return fecha.toLocaleString('es-CO', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function verHistorialCliente(clienteId) {
+  clienteHistorialActivoId = clienteId;
+  const contenedor = document.getElementById('panelHistorialCliente');
+  if (!contenedor) return;
+
+  const cliente = state.clientes.find(c => c.id === clienteId);
+  if (!cliente) return;
+
+  const fiados = (state.ventas || [])
+    .filter(v => v.tipo === 'fiado' && v.clienteId === clienteId)
+    .map(v => {
+      const detalleItems = Array.isArray(v.items) && v.items.length > 0
+        ? ` (${v.items.map(i => `${i.cantidad}x ${i.nombre}`).join(', ')})`
+        : '';
+      return {
+        fechaRaw: v.fecha || '',
+        fecha: formatearFechaMovimiento(v.fecha),
+        concepto: `Compra fiada${detalleItems}`,
+        monto: `+${formatoCOP(v.total)}`,
+        claseMonto: 'text-danger fw-semibold'
+      };
+    });
+
+  const abonos = (state.abonos || [])
+    .filter(a => a.clienteId === clienteId)
+    .map(a => ({
+      fechaRaw: a.fecha || '',
+      fecha: formatearFechaMovimiento(a.fecha),
+      concepto: 'Abono registrado',
+      monto: `-${formatoCOP(a.monto)}`,
+      claseMonto: 'text-success fw-semibold'
+    }));
+
+  const movimientos = [...fiados, ...abonos].sort(
+    (a, b) => new Date(a.fechaRaw) - new Date(b.fechaRaw)
+  );
+
+  contenedor.innerHTML = `
+    <div class="card border-secondary-subtle bg-light">
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <strong>🔒 Historial Inmutable — ${cliente.nombre}</strong>
+          <span class="badge bg-dark ms-2">Solo lectura / Auditoría</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cerrarHistorialCliente()">Cerrar</button>
+      </div>
+      <div class="card-body p-3">
+        ${
+          movimientos.length === 0
+            ? '<p class="text-muted small mb-0">Este cliente aún no tiene compras fiadas ni abonos registrados.</p>'
+            : `<div class="table-responsive">
+                <table class="table table-sm table-bordered bg-white align-middle small mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Concepto</th>
+                      <th>Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${movimientos
+                      .map(
+                        m => `
+                          <tr>
+                            <td>${m.fecha}</td>
+                            <td>${m.concepto}</td>
+                            <td class="${m.claseMonto}">${m.monto}</td>
+                          </tr>
+                        `
+                      )
+                      .join('')}
+                  </tbody>
+                </table>
+              </div>`
+        }
+        <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top small">
+          <span class="text-muted">Los registros históricos no pueden editarse ni eliminarse.</span>
+          <strong>Saldo actual: <span class="${cliente.saldoActual > 0 ? 'text-danger' : 'text-success'}">${formatoCOP(cliente.saldoActual)}</span></strong>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function cerrarHistorialCliente() {
+  clienteHistorialActivoId = null;
+  const contenedor = document.getElementById('panelHistorialCliente');
+  if (contenedor) contenedor.innerHTML = '';
+}
+
 // Exponer funciones al ámbito global para eventos onclick del HTML al usar type="module"
 window.agregarAlCarrito = agregarAlCarrito;
 window.cambiarCantidadCarrito = cambiarCantidadCarrito;
 window.registrarAbono = registrarAbono;
+window.verHistorialCliente = verHistorialCliente;
+window.cerrarHistorialCliente = cerrarHistorialCliente;
 
 // Renderizado de Mostrador
 function renderProductosMostrador(lista = state.productos) {
@@ -428,31 +604,43 @@ function renderAll() {
   }).join('');
 
   // 5. Cartera y Cobro a Morosos (HU-07 / HU-08)
-  const clientesOrdenados = [...state.clientes].sort((a, b) => b.saldoActual - a.saldoActual);
-  document.getElementById('tablaCarteraBody').innerHTML = clientesOrdenados.map(c => {
-    const esMoroso = c.saldoActual > 0 && c.diasMora >= 7;
-    const waCobro = window.KleinesCore.generarEnlaceWhatsAppCobro(c);
-    return `
-      <tr>
-        <td class="fw-semibold">${c.nombre}</td>
-        <td>${c.telefono}</td>
-        <td class="fw-bold ${c.saldoActual > 0 ? 'text-danger' : 'text-success'}">${formatoCOP(c.saldoActual)}</td>
-        <td>
-          ${c.saldoActual === 0
-            ? '<span class="badge bg-success-subtle text-success">Al día</span>'
-            : esMoroso
-              ? `<span class="badge bg-danger">Moroso (${c.diasMora} días)</span>`
-              : `<span class="badge bg-warning text-dark">Pendiente (${c.diasMora}d)</span>`}
-        </td>
-        <td class="d-flex gap-1">
-          ${c.saldoActual > 0 ? `
-            <button class="btn btn-sm btn-outline-primary" onclick="registrarAbono('${c.id}')">Abonar</button>
-            <a href="${waCobro}" target="_blank" class="btn btn-sm btn-success">📲 Cobrar WhatsApp</a>
-          ` : '<span class="text-muted small">Sin saldo</span>'}
-        </td>
-      </tr>
-    `;
-  }).join('');
+  const soloMorosos = document.getElementById('filtroSoloMorosos')?.checked;
+  const clientesVisibles = soloMorosos
+    ? window.KleinesCore.filtrarClientesMorosos(state.clientes, 7)
+    : [...state.clientes].sort((a, b) => b.saldoActual - a.saldoActual);
+
+  const tbodyCartera = document.getElementById('tablaCarteraBody');
+  tbodyCartera.innerHTML = clientesVisibles.length === 0
+    ? '<tr><td colspan="5" class="text-center text-muted py-3">No hay clientes morosos con 7 o más días de mora.</td></tr>'
+    : clientesVisibles.map(c => {
+        const esMoroso = c.saldoActual > 0 && c.diasMora >= 7;
+        const waCobro = window.KleinesCore.generarEnlaceWhatsAppCobro(c);
+        return `
+          <tr>
+            <td class="fw-semibold">${c.nombre}</td>
+            <td>${c.telefono}</td>
+            <td class="fw-bold ${c.saldoActual > 0 ? 'text-danger' : 'text-success'}">${formatoCOP(c.saldoActual)}</td>
+            <td>
+              ${c.saldoActual === 0
+                ? '<span class="badge bg-success-subtle text-success">Al día</span>'
+                : esMoroso
+                  ? `<span class="badge bg-danger">Moroso (${c.diasMora} días)</span>`
+                  : `<span class="badge bg-warning text-dark">Pendiente (${c.diasMora}d)</span>`}
+            </td>
+            <td class="d-flex flex-wrap gap-1">
+              ${c.saldoActual > 0 ? `
+                <button class="btn btn-sm btn-outline-primary" onclick="registrarAbono('${c.id}')">Abonar</button>
+                <a href="${waCobro}" target="_blank" class="btn btn-sm btn-success">📲 Cobrar WhatsApp</a>
+              ` : ''}
+              <button class="btn btn-sm btn-outline-secondary" onclick="verHistorialCliente('${c.id}')">Historial</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+  if (clienteHistorialActivoId) {
+    verHistorialCliente(clienteHistorialActivoId);
+  }
 
   renderCarrito();
 }
