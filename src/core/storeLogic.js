@@ -1,7 +1,7 @@
 /**
  * Módulo Core de Kleines PWA
- * Contiene la lógica pura de ventas, alertas de stock bajo, agrupación por proveedores,
- * enlaces de WhatsApp, arqueo de caja, cartera y cobro a morosos.
+ * Contiene la lógica pura de ventas, alertas de stock bajo, lista general de faltantes,
+ * agrupación automática por proveedores, enlaces de WhatsApp, arqueo de caja, cartera y cobro a morosos.
  */
 
 function calcularTotalCarrito(carrito) {
@@ -22,8 +22,40 @@ function detectarProductosBajosStock(productos) {
   return productos.filter(p => Number(p.stock) <= Number(p.umbralMinimo));
 }
 
-function agruparPedidosPorProveedor(productos, proveedores) {
+function calcularCantidadSugerida(producto) {
+  return Math.max((Number(producto.umbralMinimo) * 2) - Number(producto.stock), 1);
+}
+
+/**
+ * Construye la Lista General de Pedidos Faltantes combinando los productos bajos en stock
+ * con las selecciones personalizadas del usuario (incluido, cantidad a pedir y proveedor destino).
+ */
+function construirListaGeneralPedidos(productos, seleccionPedidos = {}) {
   const bajos = detectarProductosBajosStock(productos);
+  return bajos.map(prod => {
+    const config = seleccionPedidos[prod.id] || {};
+    const cantidadSugerida = calcularCantidadSugerida(prod);
+    return {
+      id: prod.id,
+      nombre: prod.nombre,
+      stockActual: Number(prod.stock),
+      umbralMinimo: Number(prod.umbralMinimo),
+      incluido: config.incluido !== undefined ? Boolean(config.incluido) : true,
+      cantidadPedir: config.cantidad !== undefined && Number(config.cantidad) > 0
+        ? Number(config.cantidad)
+        : cantidadSugerida,
+      proveedorId: config.proveedorId !== undefined ? config.proveedorId : (prod.proveedorId || '')
+    };
+  });
+}
+
+/**
+ * Agrupa automáticamente en sublistas por proveedor los productos activos de la Lista General.
+ * Compatible tanto con llamada directa (productos, proveedores) como con seleccionPedidos.
+ */
+function agruparPedidosPorProveedor(productos, proveedores, seleccionPedidos = {}) {
+  const listaGeneral = construirListaGeneralPedidos(productos, seleccionPedidos);
+  const seleccionados = listaGeneral.filter(item => item.incluido);
   const mapaProveedores = new Map();
 
   proveedores.forEach(prov => {
@@ -39,17 +71,16 @@ function agruparPedidosPorProveedor(productos, proveedores) {
     items: []
   });
 
-  bajos.forEach(prod => {
-    const cantidadSugerida = Math.max((Number(prod.umbralMinimo) * 2) - Number(prod.stock), 1);
+  seleccionados.forEach(item => {
     const itemPedido = {
-      id: prod.id,
-      nombre: prod.nombre,
-      stockActual: Number(prod.stock),
-      umbralMinimo: Number(prod.umbralMinimo),
-      cantidadSugerida
+      id: item.id,
+      nombre: item.nombre,
+      stockActual: item.stockActual,
+      umbralMinimo: item.umbralMinimo,
+      cantidadSugerida: item.cantidadPedir
     };
 
-    const key = mapaProveedores.has(prod.proveedorId) ? prod.proveedorId : 'sin-proveedor';
+    const key = mapaProveedores.has(item.proveedorId) ? item.proveedorId : 'sin-proveedor';
     mapaProveedores.get(key).items.push(itemPedido);
   });
 
@@ -123,6 +154,8 @@ const KleinesCore = {
   calcularTotalCarrito,
   calcularVuelto,
   detectarProductosBajosStock,
+  calcularCantidadSugerida,
+  construirListaGeneralPedidos,
   agruparPedidosPorProveedor,
   generarEnlaceWhatsAppProveedor,
   calcularResumenCaja,

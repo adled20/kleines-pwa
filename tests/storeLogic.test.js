@@ -1,6 +1,7 @@
 const {
   calcularTotalCarrito,
   detectarProductosBajosStock,
+  construirListaGeneralPedidos,
   agruparPedidosPorProveedor,
   generarEnlaceWhatsAppProveedor,
   calcularResumenCaja,
@@ -28,20 +29,32 @@ describe('Pruebas Unitarias Kleines PWA (TDD)', () => {
     expect(bajos.map(p => p.id)).toEqual(['2', '3']);
   });
 
-  test('HU-03: Agrupa productos bajos en stock en sublistas por proveedor y genera link WhatsApp', () => {
+  test('HU-03: Construye Lista General de Faltantes, permite elegir productos/proveedores y arma sublistas WhatsApp', () => {
     const proveedores = [
-      { id: 'prov-1', nombre: 'Carlos Pérez', empresa: 'Distribuidora El Sol', telefono: '573001112233' }
+      { id: 'prov-1', nombre: 'Carlos Pérez', empresa: 'Distribuidora El Sol', telefono: '573001112233' },
+      { id: 'prov-2', nombre: 'Marta Ruiz', empresa: 'Lácteos del Caribe', telefono: '573104445566' }
     ];
     const productos = [
-      { id: 'p1', nombre: 'Aceite 1L', stock: 2, umbralMinimo: 5, proveedorId: 'prov-1' }
+      { id: 'p1', nombre: 'Aceite 1L', stock: 2, umbralMinimo: 5, proveedorId: 'prov-1' },
+      { id: 'p2', nombre: 'Leche 1L', stock: 1, umbralMinimo: 4, proveedorId: 'prov-2' }
     ];
-    const grupos = agruparPedidosPorProveedor(productos, proveedores);
-    expect(grupos).toHaveLength(1);
-    expect(grupos[0].items[0].cantidadSugerida).toBe(8);
 
-    const url = generarEnlaceWhatsAppProveedor(proveedores[0], grupos[0].items, 'Tienda Don Carlos');
-    expect(url).toContain('https://wa.me/573001112233?text=');
-    expect(decodeURIComponent(url)).toContain('Aceite 1L: pedir 8 unids.');
+    const listaGeneral = construirListaGeneralPedidos(productos);
+    expect(listaGeneral).toHaveLength(2);
+    expect(listaGeneral[0].incluido).toBe(true);
+
+    const seleccionPersonalizada = {
+      p1: { incluido: true, cantidad: 12, proveedorId: 'prov-2' },
+      p2: { incluido: false }
+    };
+    const grupos = agruparPedidosPorProveedor(productos, proveedores, seleccionPersonalizada);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].proveedor.id).toBe('prov-2');
+    expect(grupos[0].items[0].cantidadSugerida).toBe(12);
+
+    const url = generarEnlaceWhatsAppProveedor(proveedores[1], grupos[0].items, 'Tienda Don Carlos');
+    expect(url).toContain('https://wa.me/573104445566?text=');
+    expect(decodeURIComponent(url)).toContain('Aceite 1L: pedir 12 unids.');
   });
 
   test('HU-05: Calcula el dinero físico en caja separando contado, abonos y fiados', () => {

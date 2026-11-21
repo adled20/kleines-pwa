@@ -14,6 +14,7 @@
     .btn-emerald:hover { background-color: #047857; color: #fff; }
     .nav-pills .nav-link.active { background-color: #059669; }
     .nav-pills .nav-link { color: #475569; font-weight: 500; }
+    .editing-highlight { border: 2px solid #059669 !important; background-color: #f0fdf4 !important; }
   </style>
 </head>
 <body>
@@ -41,11 +42,11 @@
     <!-- Navegación Principal -->
     <ul class="nav nav-pills mb-4 gap-2" id="tabsKleines">
       <li class="nav-item"><button class="nav-link active" data-tab="mostrador">🛒 Mostrador y Caja</button></li>
-      <li class="nav-item"><button class="nav-link" data-tab="inventario">📦 Inventario y Proveedores <span id="badgeStockBajo" class="badge bg-danger ms-1">0</span></button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="inventario">📦 Inventario, Pedidos y Proveedores <span id="badgeStockBajo" class="badge bg-danger ms-1">0</span></button></li>
       <li class="nav-item"><button class="nav-link" data-tab="cartera">📒 Cartera y Morosos</button></li>
     </ul>
 
-    <!-- TAB 1: MOSTRADOR Y AYUDA DE CAJA -->
+    <!-- TAB 1: MOSTRADOR Y AYUDA DE CAJA (DEV 2) -->
     <section id="tab-mostrador" class="tab-view">
       <!-- Ayuda de Dinero en Caja (HU-05) -->
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -143,62 +144,131 @@
       </div>
     </section>
 
-    <!-- TAB 2: INVENTARIO, PROVEEDORES Y WHATSAPP (HU-02 / HU-03) -->
+    <!-- TAB 2: INVENTARIO, PEDIDOS Y PROVEEDORES (DEV 1 — HU-02 / HU-03) -->
     <section id="tab-inventario" class="tab-view d-none">
+      <!-- BLOQUE 1: GESTIÓN Y DIRECTORIO DE PROVEEDORES -->
       <div class="row g-4 mb-4">
-        <!-- Formulario Nuevo Proveedor -->
-        <div class="col-md-5 admin-only">
-          <div class="card-clean p-4 h-100">
-            <h6 class="fw-bold mb-3">1. Registrar Proveedor</h6>
+        <div class="col-lg-4 admin-only">
+          <div id="cardFormProveedor" class="card-clean p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h6 id="tituloFormProveedor" class="fw-bold mb-0">1. Registrar Proveedor</h6>
+              <button type="button" id="btnCancelarEdicionProv" class="btn btn-sm btn-outline-secondary d-none">Cancelar</button>
+            </div>
             <form id="formProveedor" class="vstack gap-2">
-              <input type="text" id="provNombre" class="form-control form-control-sm" placeholder="Nombre del preventista (ej. Carlos)" required />
-              <input type="text" id="provEmpresa" class="form-control form-control-sm" placeholder="Empresa (ej. Distribuidora El Sol)" required />
-              <input type="tel" id="provTelefono" class="form-control form-control-sm" placeholder="WhatsApp con código país (ej. 573001234567)" required />
-              <button type="submit" class="btn btn-emerald btn-sm mt-2">Guardar Proveedor</button>
+              <input type="hidden" id="provEditId" />
+              <div>
+                <label class="form-label small mb-1">Nombre del preventista / contacto</label>
+                <input type="text" id="provNombre" class="form-control form-control-sm" placeholder="Ej. Carlos Gómez" required />
+              </div>
+              <div>
+                <label class="form-label small mb-1">Empresa o Distribuidora</label>
+                <input type="text" id="provEmpresa" class="form-control form-control-sm" placeholder="Ej. Distribuidora El Sol" required />
+              </div>
+              <div>
+                <label class="form-label small mb-1">WhatsApp (con código país)</label>
+                <input type="tel" id="provTelefono" class="form-control form-control-sm" placeholder="Ej. 573001112233" required />
+              </div>
+              <button type="submit" id="btnSubmitProveedor" class="btn btn-emerald btn-sm mt-2 fw-semibold">Guardar Proveedor</button>
             </form>
           </div>
         </div>
 
-        <!-- Formulario Nuevo Producto -->
-        <div class="col-md-7 admin-only">
+        <div class="col-lg-8">
           <div class="card-clean p-4 h-100">
-            <h6 class="fw-bold mb-3">2. Agregar Producto al Inventario</h6>
-            <form id="formProducto" class="row g-2">
-              <div class="col-md-6">
-                <input type="text" id="prodNombre" class="form-control form-control-sm" placeholder="Nombre del producto" required />
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <div>
+                <h6 class="fw-bold mb-0">📋 Mis Proveedores Registrados</h6>
+                <small class="text-muted">Visualiza, edita los datos de contacto o administra tus preventistas.</small>
               </div>
-              <div class="col-md-6">
-                <select id="prodProveedor" class="form-select form-select-sm" required></select>
-              </div>
-              <div class="col-md-4">
-                <input type="number" id="prodPrecio" class="form-control form-control-sm" placeholder="Precio venta ($)" required />
-              </div>
-              <div class="col-md-4">
-                <input type="number" id="prodStock" class="form-control form-control-sm" placeholder="Stock inicial" required />
-              </div>
-              <div class="col-md-4">
-                <input type="number" id="prodUmbral" class="form-control form-control-sm" placeholder="Umbral mínimo alerta" required />
-              </div>
-              <div class="col-12">
-                <button type="submit" class="btn btn-emerald btn-sm w-100 mt-1">Guardar Producto</button>
-              </div>
-            </form>
+              <span id="contadorProveedores" class="badge bg-secondary-subtle text-dark border">0 proveedores</span>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-hover align-middle small mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Empresa</th>
+                    <th>Contacto</th>
+                    <th>WhatsApp</th>
+                    <th>Productos</th>
+                    <th class="admin-only">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tablaProveedoresBody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Sublistas de Reabastecimiento por Proveedor (WhatsApp) -->
+      <!-- BLOQUE 2: AGREGAR PRODUCTO AL INVENTARIO -->
+      <div class="card-clean p-4 mb-4 admin-only">
+        <h6 class="fw-bold mb-3">2. Agregar Nuevo Producto al Inventario</h6>
+        <form id="formProducto" class="row g-2 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label small mb-1">Nombre del producto</label>
+            <input type="text" id="prodNombre" class="form-control form-control-sm" placeholder="Ej. Azúcar 1Kg" required />
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">Proveedor habitual</label>
+            <select id="prodProveedor" class="form-select form-select-sm" required></select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">Precio venta ($)</label>
+            <input type="number" id="prodPrecio" class="form-control form-control-sm" placeholder="3500" required />
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">Stock inicial</label>
+            <input type="number" id="prodStock" class="form-control form-control-sm" placeholder="10" required />
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">Umbral mínimo</label>
+            <input type="number" id="prodUmbral" class="form-control form-control-sm" placeholder="5" required />
+          </div>
+          <div class="col-12 mt-2">
+            <button type="submit" class="btn btn-emerald btn-sm px-4 fw-semibold">Guardar Producto</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- BLOQUE 3: LISTA GENERAL DE PEDIDOS FALTANTES -> SUBLISTAS AUTOMÁTICAS WHATSAPP -->
       <div class="card-clean p-4 mb-4">
-        <h6 class="fw-bold mb-1">📲 Lista General de Stock Bajo — Sublistas para Proveedores (WhatsApp)</h6>
-        <p class="text-muted small mb-3">Los productos con stock menor o igual a su umbral mínimo se agrupan automáticamente por proveedor.</p>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div>
+            <h6 class="fw-bold mb-0">📝 Paso 1: Lista General de Pedidos Faltantes (Stock Bajo)</h6>
+            <small class="text-muted">Elige qué productos faltantes incluir en el pedido, ajusta cantidades y selecciona o cambia el proveedor destino.</small>
+          </div>
+          <button type="button" id="btnResetListaGeneral" class="btn btn-sm btn-outline-secondary">↻ Restaurar selección automática</button>
+        </div>
+
+        <div class="table-responsive mb-4">
+          <table class="table table-bordered align-middle small mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width: 55px;" class="text-center">Pedir</th>
+                <th>Producto Faltante</th>
+                <th>Stock Actual / Mín.</th>
+                <th style="width: 140px;">Cantidad a Pedir</th>
+                <th style="width: 260px;">Enviar a Sublista de Proveedor</th>
+              </tr>
+            </thead>
+            <tbody id="tablaListaGeneralBody"></tbody>
+          </table>
+        </div>
+
+        <hr class="my-4" />
+
+        <div class="mb-3">
+          <h6 class="fw-bold mb-1">📲 Paso 2: Sublistas Automáticas por Proveedor (Listas para WhatsApp)</h6>
+          <small class="text-muted">Se crean y actualizan automáticamente según los productos y proveedores elegidos en la Lista General.</small>
+        </div>
         <div id="contenedorSublistasProveedores" class="row g-3"></div>
       </div>
 
-      <!-- Tabla General de Inventario -->
+      <!-- BLOQUE 4: INVENTARIO COMPLETO -->
       <div class="card-clean p-4">
         <h6 class="fw-bold mb-3">Inventario Completo</h6>
         <div class="table-responsive">
-          <table class="table table-hover align-middle small">
+          <table class="table table-hover align-middle small mb-0">
             <thead class="table-light">
               <tr>
                 <th>Producto</th>
@@ -206,6 +276,7 @@
                 <th>Precio</th>
                 <th>Stock / Mínimo</th>
                 <th>Estado</th>
+                <th>Ajuste Rápido</th>
               </tr>
             </thead>
             <tbody id="tablaInventarioBody"></tbody>
@@ -214,7 +285,7 @@
       </div>
     </section>
 
-    <!-- TAB 3: CARTERA, MOROSOS Y RECORDATORIOS WHATSAPP (HU-06 / HU-07 / HU-08) -->
+    <!-- TAB 3: CARTERA, MOROSOS Y RECORDATORIOS WHATSAPP (DEV 3 — HU-06 / HU-07 / HU-08) -->
     <section id="tab-cartera" class="tab-view d-none">
       <div class="row g-4">
         <!-- Registrar Nuevo Fiador (Ley 1581) -->
