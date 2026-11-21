@@ -48,7 +48,14 @@
     <!-- TAB 1: MOSTRADOR Y AYUDA DE CAJA -->
     <section id="tab-mostrador" class="tab-view">
       <!-- Ayuda de Dinero en Caja (HU-05) -->
-      <div class="row g-3 mb-4">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="fw-bold text-muted text-uppercase mb-0 small">Resumen de Caja del Día</h6>
+        <button id="btnDetalleCierre" type="button" class="btn btn-sm btn-outline-dark">
+          Ver detalle de cierre
+        </button>
+      </div>
+
+      <div class="row g-3 mb-3">
         <div class="col-md-4">
           <div class="card-clean p-3">
             <small class="text-muted text-uppercase fw-semibold">Dinero Físico en Caja (Hoy)</small>
@@ -72,11 +79,24 @@
         </div>
       </div>
 
+      <!-- Panel Desplegable de Detalle de Cierre (HU-05) -->
+      <div id="panelDetalleCierre" class="d-none mb-4"></div>
+
       <div class="row g-4">
         <!-- Catálogo Rápido -->
         <div class="col-lg-7">
           <div class="card-clean p-4">
-            <h6 class="fw-bold mb-3">Catálogo Rápido de Mostrador</h6>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+              <h6 class="fw-bold mb-0">Catálogo Rápido de Mostrador</h6>
+              <input
+                type="text"
+                id="buscarProductoMostrador"
+                class="form-control form-control-sm"
+                style="max-width: 260px;"
+                placeholder="Buscar producto..."
+                autocomplete="off"
+              />
+            </div>
             <div id="gridProductosMostrador" class="row g-3"></div>
           </div>
         </div>
@@ -89,9 +109,24 @@
               <button id="btnVaciarCarrito" class="btn btn-sm btn-outline-secondary">Vaciar</button>
             </div>
             <ul id="listaCarrito" class="list-group list-group-flush mb-3"></ul>
-            <div class="d-flex justify-content-between align-items-center border-top pt-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center border-top pt-3 mb-2">
               <span class="fw-semibold">Total a Cobrar:</span>
               <h4 id="totalCarrito" class="fw-bold mb-0">$0</h4>
+            </div>
+
+            <!-- Calculadora de Vuelto (HU-04) -->
+            <div class="bg-light border rounded-3 p-3 mb-3">
+              <label for="efectivoRecibido" class="form-label small fw-semibold mb-1">
+                Efectivo recibido (Contado)
+              </label>
+              <input
+                type="number"
+                id="efectivoRecibido"
+                class="form-control form-control-sm mb-2"
+                min="0"
+                placeholder="Ej: 20000"
+              />
+              <p id="textoVuelto" class="small fw-bold text-muted mb-0">Vuelto: $0</p>
             </div>
 
             <div class="mb-3">
@@ -186,15 +221,16 @@
         <div class="col-lg-4">
           <div class="card-clean p-4">
             <h6 class="fw-bold mb-3">Nuevo Cliente Fiador</h6>
-            <form id="formCliente" class="vstack gap-2">
+            <form id="formCliente" class="vstack gap-2" novalidate>
               <input type="text" id="cliNombre" class="form-control form-control-sm" placeholder="Nombre completo del vecino" required />
               <input type="tel" id="cliTelefono" class="form-control form-control-sm" placeholder="WhatsApp (ej. 573009876543)" required />
               <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" id="cliConsentimiento" required />
+                <input class="form-check-input" type="checkbox" id="cliConsentimiento" />
                 <label class="form-check-label small text-muted" for="cliConsentimiento">
                   Autorizo el tratamiento de datos personales para gestión de crédito (Ley 1581 de 2012).
                 </label>
               </div>
+              <div id="errorConsentimiento" class="text-danger small fw-semibold d-none"></div>
               <button type="submit" class="btn btn-emerald btn-sm mt-2">Registrar Cliente</button>
             </form>
           </div>
@@ -203,7 +239,15 @@
         <!-- Lista de Deudores / Morosos -->
         <div class="col-lg-8">
           <div class="card-clean p-4">
-            <h6 class="fw-bold mb-3">Cobro a Morosos y Cartera Activa</h6>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+              <h6 class="fw-bold mb-0">Cobro a Morosos y Cartera Activa</h6>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="filtroSoloMorosos" />
+                <label class="form-check-label small fw-semibold" for="filtroSoloMorosos">
+                  Mostrar solo morosos (&ge; 7 días)
+                </label>
+              </div>
+            </div>
             <div class="table-responsive">
               <table class="table table-hover align-middle small">
                 <thead class="table-light">
@@ -218,6 +262,9 @@
                 <tbody id="tablaCarteraBody"></tbody>
               </table>
             </div>
+
+            <!-- Panel de Historial Inmutable por Cliente (HU-07) -->
+            <div id="panelHistorialCliente" class="mt-3"></div>
           </div>
         </div>
       </div>
@@ -225,6 +272,6 @@
   </div>
 
   <script src="src/core/storeLogic.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
