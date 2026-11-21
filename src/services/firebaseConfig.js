@@ -10,10 +10,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
-  // Pega aquí las credenciales reales del proyecto Kleines en Firebase Console
-  apiKey: "TU_API_KEY",
+  apiKey: "AIzaSyBugqZJqHq798SEIrTTMSzOmhFNvin7IZg",
   authDomain: "kleines-pwa.firebaseapp.com",
-  projectId: "kleines-pwa"
+  projectId: "kleines-pwa",
+  storageBucket: "kleines-pwa.firebasestorage.app",
+  messagingSenderId: "656647534023",
+  appId: "1:656647534023:web:9faf23f71ba371a0cbd5e2"
 };
 
 const app = initializeApp(firebaseConfig);
