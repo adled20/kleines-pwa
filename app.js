@@ -31,10 +31,12 @@ const defaultState = {
   abonos: [
     { id: 'a-1', clienteId: 'c-2', monto: 15000, fecha: new Date().toISOString() }
   ],
-  carrito: []
+  carrito: [],
+  seleccionPedidos: {}
 };
 
 let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState;
+if (!state.seleccionPedidos) state.seleccionPedidos = {};
 let clienteHistorialActivoId = null;
 
 function saveState() {
@@ -74,7 +76,7 @@ function actualizarEstadoRed() {
 window.addEventListener('online', actualizarEstadoRed);
 window.addEventListener('offline', actualizarEstadoRed);
 
-// Buscador en tiempo real en Mostrador (HU-04)
+// Buscador en tiempo real en Mostrador (HU-04 - Dev 2)
 const inputBuscador = document.getElementById('buscarProductoMostrador');
 if (inputBuscador) {
   inputBuscador.addEventListener('input', e => {
@@ -86,7 +88,7 @@ if (inputBuscador) {
   });
 }
 
-// Carrito, Controles +/- y Calculadora de Vuelto (HU-04)
+// Carrito, Controles +/- y Calculadora de Vuelto (HU-04 - Dev 2)
 function agregarAlCarrito(prodId) {
   const prod = state.productos.find(p => p.id === prodId);
   if (!prod || prod.stock <= 0) return alert('Producto sin existencias disponibles.');
@@ -220,7 +222,7 @@ function procesarVenta(tipo) {
 document.getElementById('btnCobrarContado').addEventListener('click', () => procesarVenta('contado'));
 document.getElementById('btnCobrarFiado').addEventListener('click', () => procesarVenta('fiado'));
 
-// Detalle de Arqueo Diario de Caja (HU-05)
+// Detalle de Arqueo Diario de Caja (HU-05 - Dev 2)
 const btnDetalleCierre = document.getElementById('btnDetalleCierre');
 if (btnDetalleCierre) {
   btnDetalleCierre.addEventListener('click', () => {
@@ -259,19 +261,81 @@ function renderDetalleCierre() {
   `;
 }
 
-// Formularios de Proveedores, Productos y Clientes (HU-02 / HU-06)
+// =========================================================================
+// GESTIÓN COMPLETA DE PROVEEDORES (CREAR, VER, EDITAR Y ELIMINAR) - DEV 1
+// =========================================================================
+function limpiarFormularioProveedor() {
+  document.getElementById('formProveedor').reset();
+  document.getElementById('provEditId').value = '';
+  document.getElementById('tituloFormProveedor').textContent = '1. Registrar Proveedor';
+  document.getElementById('btnSubmitProveedor').textContent = 'Guardar Proveedor';
+  document.getElementById('btnCancelarEdicionProv').classList.add('d-none');
+  document.getElementById('cardFormProveedor').classList.remove('editing-highlight');
+}
+
+function editarProveedor(provId) {
+  const prov = state.proveedores.find(p => p.id === provId);
+  if (!prov) return;
+
+  document.getElementById('provEditId').value = prov.id;
+  document.getElementById('provNombre').value = prov.nombre;
+  document.getElementById('provEmpresa').value = prov.empresa;
+  document.getElementById('provTelefono').value = prov.telefono;
+
+  document.getElementById('tituloFormProveedor').textContent = '✏️ Editando Proveedor';
+  document.getElementById('btnSubmitProveedor').textContent = 'Actualizar Proveedor';
+  document.getElementById('btnCancelarEdicionProv').classList.remove('d-none');
+  document.getElementById('cardFormProveedor').classList.add('editing-highlight');
+  document.getElementById('provNombre').focus();
+}
+
+function eliminarProveedor(provId) {
+  const prov = state.proveedores.find(p => p.id === provId);
+  if (!prov) return;
+  if (!confirm(`¿Seguro que deseas eliminar al proveedor "${prov.empresa}" (${prov.nombre})?`)) return;
+
+  state.proveedores = state.proveedores.filter(p => p.id !== provId);
+  state.productos.forEach(prod => {
+    if (prod.proveedorId === provId) prod.proveedorId = '';
+  });
+  if (document.getElementById('provEditId').value === provId) {
+    limpiarFormularioProveedor();
+  }
+  saveState();
+}
+
+document.getElementById('btnCancelarEdicionProv').addEventListener('click', limpiarFormularioProveedor);
+
 document.getElementById('formProveedor').addEventListener('submit', e => {
   e.preventDefault();
-  state.proveedores.push({
-    id: 'prov-' + Date.now(),
-    nombre: document.getElementById('provNombre').value.trim(),
-    empresa: document.getElementById('provEmpresa').value.trim(),
-    telefono: document.getElementById('provTelefono').value.trim()
-  });
-  e.target.reset();
+  const editId = document.getElementById('provEditId').value;
+  const nombre = document.getElementById('provNombre').value.trim();
+  const empresa = document.getElementById('provEmpresa').value.trim();
+  const telefono = document.getElementById('provTelefono').value.trim();
+
+  if (editId) {
+    const prov = state.proveedores.find(p => p.id === editId);
+    if (prov) {
+      prov.nombre = nombre;
+      prov.empresa = empresa;
+      prov.telefono = telefono;
+    }
+  } else {
+    state.proveedores.push({
+      id: 'prov-' + Date.now(),
+      nombre,
+      empresa,
+      telefono
+    });
+  }
+
+  limpiarFormularioProveedor();
   saveState();
 });
 
+// =========================================================================
+// PRODUCTOS Y LISTA GENERAL DE FALTANTES -> SUBLISTAS WHATSAPP - DEV 1
+// =========================================================================
 document.getElementById('formProducto').addEventListener('submit', e => {
   e.preventDefault();
   state.productos.push({
@@ -286,6 +350,40 @@ document.getElementById('formProducto').addEventListener('submit', e => {
   saveState();
 });
 
+function ajustarStock(prodId, delta) {
+  const prod = state.productos.find(p => p.id === prodId);
+  if (!prod) return;
+  prod.stock = Math.max(0, Number(prod.stock) + delta);
+  saveState();
+}
+
+function toggleItemPedido(prodId, incluido) {
+  if (!state.seleccionPedidos[prodId]) state.seleccionPedidos[prodId] = {};
+  state.seleccionPedidos[prodId].incluido = incluido;
+  saveState();
+}
+
+function cambiarCantidadPedido(prodId, cantidad) {
+  const valor = Math.max(1, Number(cantidad) || 1);
+  if (!state.seleccionPedidos[prodId]) state.seleccionPedidos[prodId] = {};
+  state.seleccionPedidos[prodId].cantidad = valor;
+  saveState();
+}
+
+function cambiarProveedorPedido(prodId, proveedorId) {
+  if (!state.seleccionPedidos[prodId]) state.seleccionPedidos[prodId] = {};
+  state.seleccionPedidos[prodId].proveedorId = proveedorId;
+  saveState();
+}
+
+document.getElementById('btnResetListaGeneral').addEventListener('click', () => {
+  state.seleccionPedidos = {};
+  saveState();
+});
+
+// =========================================================================
+// CARTERA, MOROSOS Y HISTORIAL INMUTABLE (HU-06 / HU-07 / HU-08 - DEV 3)
+// =========================================================================
 document.getElementById('formCliente').addEventListener('submit', async e => {
   e.preventDefault();
   const nombre = document.getElementById('cliNombre').value.trim();
@@ -332,7 +430,6 @@ document.getElementById('formCliente').addEventListener('submit', async e => {
   saveState();
 });
 
-// Interruptor de filtro de morosos (HU-08)
 const chkSoloMorosos = document.getElementById('filtroSoloMorosos');
 if (chkSoloMorosos) {
   chkSoloMorosos.addEventListener('change', () => {
@@ -340,7 +437,6 @@ if (chkSoloMorosos) {
   });
 }
 
-// Abonos a Morosos (HU-07 Escenario 1 y 2)
 function registrarAbono(clienteId) {
   const cliente = state.clientes.find(c => c.id === clienteId);
   if (!cliente || cliente.saldoActual <= 0) return;
@@ -375,7 +471,6 @@ function registrarAbono(clienteId) {
   }
 }
 
-// Historial Inmutable por Cliente (HU-07 Escenario 3)
 function formatearFechaMovimiento(isoString) {
   if (!isoString) return 'Sin fecha';
   const fecha = new Date(isoString);
@@ -479,12 +574,18 @@ function cerrarHistorialCliente() {
   if (contenedor) contenedor.innerHTML = '';
 }
 
-// Exponer funciones al ámbito global para eventos onclick del HTML al usar type="module"
+// Exponer funciones al ámbito global para eventos onclick/onchange del HTML al usar type="module"
 window.agregarAlCarrito = agregarAlCarrito;
 window.cambiarCantidadCarrito = cambiarCantidadCarrito;
 window.registrarAbono = registrarAbono;
 window.verHistorialCliente = verHistorialCliente;
 window.cerrarHistorialCliente = cerrarHistorialCliente;
+window.editarProveedor = editarProveedor;
+window.eliminarProveedor = eliminarProveedor;
+window.ajustarStock = ajustarStock;
+window.toggleItemPedido = toggleItemPedido;
+window.cambiarCantidadPedido = cambiarCantidadPedido;
+window.cambiarProveedorPedido = cambiarProveedorPedido;
 
 // Renderizado de Mostrador
 function renderProductosMostrador(lista = state.productos) {
@@ -543,6 +644,8 @@ function renderCarrito() {
 }
 
 function renderAll() {
+  const esAdmin = document.getElementById('rolSelector').value === 'admin';
+
   // 1. Resumen Caja (HU-05)
   const resumen = window.KleinesCore.calcularResumenCaja(state.ventas, state.abonos);
   document.getElementById('cajaEfectivo').textContent = formatoCOP(resumen.dineroFisicoEnCaja);
@@ -559,51 +662,147 @@ function renderAll() {
     state.clientes.map(c => `<option value="${c.id}">${c.nombre} (Deuda: ${formatoCOP(c.saldoActual)})</option>`).join('');
 
   document.getElementById('prodProveedor').innerHTML =
+    '<option value="">-- Sin proveedor asignado --</option>' +
     state.proveedores.map(p => `<option value="${p.id}">${p.empresa} (${p.nombre})</option>`).join('');
 
-  // 4. Inventario y Sublistas WhatsApp (HU-02 / HU-03)
-  const bajos = window.KleinesCore.detectarProductosBajosStock(state.productos);
-  document.getElementById('badgeStockBajo').textContent = bajos.length;
+  // 4. Tabla Directorio de Proveedores (Ver, Editar y Eliminar - Dev 1)
+  document.getElementById('contadorProveedores').textContent = `${state.proveedores.length} proveedores`;
+  const tbodyProv = document.getElementById('tablaProveedoresBody');
+  tbodyProv.innerHTML = state.proveedores.length === 0
+    ? '<tr><td colspan="5" class="text-center text-muted py-3">No hay proveedores registrados aún.</td></tr>'
+    : state.proveedores.map(pr => {
+        const cantProductos = state.productos.filter(prod => prod.proveedorId === pr.id).length;
+        const telLimpio = String(pr.telefono || '').replace(/\D/g, '');
+        return `
+          <tr>
+            <td class="fw-semibold">${pr.empresa}</td>
+            <td>${pr.nombre}</td>
+            <td>
+              <a href="https://wa.me/${telLimpio}" target="_blank" class="text-decoration-none text-success fw-medium">
+                📱 ${pr.telefono}
+              </a>
+            </td>
+            <td><span class="badge bg-light text-dark border">${cantProductos} prod(s)</span></td>
+            <td class="admin-only ${esAdmin ? '' : 'd-none'}">
+              <div class="d-flex gap-1">
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="editarProveedor('${pr.id}')">✏️ Editar</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarProveedor('${pr.id}')">🗑️</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
 
-  const grupos = window.KleinesCore.agruparPedidosPorProveedor(state.productos, state.proveedores);
+  // 5. Paso 1: Lista General de Pedidos Faltantes (Stock Bajo - Dev 1)
+  const listaGeneral = window.KleinesCore.construirListaGeneralPedidos(state.productos, state.seleccionPedidos);
+  document.getElementById('badgeStockBajo').textContent = listaGeneral.length;
+
+  const tbodyGeneral = document.getElementById('tablaListaGeneralBody');
+  tbodyGeneral.innerHTML = listaGeneral.length === 0
+    ? '<tr><td colspan="5" class="text-center text-muted py-3">✅ No hay productos bajos en stock. Todos los niveles están óptimos.</td></tr>'
+    : listaGeneral.map(item => {
+        const opcionesProv = [
+          `<option value="" ${!item.proveedorId ? 'selected' : ''}>-- Proveedor General (Sin asignar) --</option>`,
+          ...state.proveedores.map(pr =>
+            `<option value="${pr.id}" ${item.proveedorId === pr.id ? 'selected' : ''}>${pr.empresa} (${pr.nombre})</option>`
+          )
+        ].join('');
+
+        return `
+          <tr class="${item.incluido ? '' : 'table-secondary text-muted'}">
+            <td class="text-center">
+              <input
+                type="checkbox"
+                class="form-check-input"
+                ${item.incluido ? 'checked' : ''}
+                onchange="toggleItemPedido('${item.id}', this.checked)"
+              />
+            </td>
+            <td>
+              <span class="fw-semibold">${item.nombre}</span>
+              <span class="badge bg-danger ms-1">Stock Bajo</span>
+            </td>
+            <td><strong>${item.stockActual}</strong> / mín. ${item.umbralMinimo}</td>
+            <td>
+              <input
+                type="number"
+                min="1"
+                class="form-control form-control-sm"
+                value="${item.cantidadPedir}"
+                ${item.incluido ? '' : 'disabled'}
+                onchange="cambiarCantidadPedido('${item.id}', this.value)"
+              />
+            </td>
+            <td>
+              <select
+                class="form-select form-select-sm"
+                ${item.incluido ? '' : 'disabled'}
+                onchange="cambiarProveedorPedido('${item.id}', this.value)"
+              >
+                ${opcionesProv}
+              </select>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+  // 6. Paso 2: Sublistas Automáticas por Proveedor (WhatsApp - Dev 1)
+  const grupos = window.KleinesCore.agruparPedidosPorProveedor(
+    state.productos,
+    state.proveedores,
+    state.seleccionPedidos
+  );
   const contSublistas = document.getElementById('contenedorSublistasProveedores');
   contSublistas.innerHTML = grupos.length === 0
-    ? '<div class="col-12 text-muted small">Todos los productos tienen stock óptimo.</div>'
+    ? '<div class="col-12 text-muted small">No hay productos seleccionados en la lista general para generar sublistas de pedido.</div>'
     : grupos.map(g => {
+        const tieneTelefono = Boolean(String(g.proveedor.telefono || '').replace(/\D/g, ''));
         const waLink = window.KleinesCore.generarEnlaceWhatsAppProveedor(g.proveedor, g.items);
         return `
           <div class="col-md-6">
-            <div class="border rounded-3 p-3 bg-light">
-              <div class="d-flex justify-content-between align-items-start mb-2">
-                <div>
-                  <strong>${g.proveedor.empresa}</strong>
-                  <div class="small text-muted">Contacto: ${g.proveedor.nombre} (${g.proveedor.telefono || 'Sin tel'})</div>
+            <div class="border rounded-3 p-3 bg-light h-100 d-flex flex-column justify-content-between">
+              <div>
+                <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                  <div>
+                    <strong class="d-block">${g.proveedor.empresa}</strong>
+                    <small class="text-muted">Preventista: ${g.proveedor.nombre} ${g.proveedor.telefono ? `(${g.proveedor.telefono})` : ''}</small>
+                  </div>
+                  ${tieneTelefono
+                    ? `<a href="${waLink}" target="_blank" class="btn btn-sm btn-success fw-semibold">📲 Enviar WhatsApp</a>`
+                    : `<span class="badge bg-warning text-dark">Asigna un proveedor</span>`
+                  }
                 </div>
-                <a href="${waLink}" target="_blank" class="btn btn-sm btn-success">📲 Enviar WhatsApp</a>
+                <ul class="small mb-0 ps-3">
+                  ${g.items.map(i => `<li><strong>${i.nombre}</strong>: pedir <strong>${i.cantidadSugerida} unids.</strong> (quedan ${i.stockActual})</li>`).join('')}
+                </ul>
               </div>
-              <ul class="small mb-0 ps-3">
-                ${g.items.map(i => `<li><strong>${i.nombre}</strong>: quedan ${i.stockActual} (sugerido pedir: ${i.cantidadSugerida})</li>`).join('')}
-              </ul>
             </div>
           </div>
         `;
       }).join('');
 
+  // 7. Inventario Completo
   document.getElementById('tablaInventarioBody').innerHTML = state.productos.map(p => {
     const prov = state.proveedores.find(pr => pr.id === p.proveedorId);
     const esBajo = p.stock <= p.umbralMinimo;
     return `
       <tr>
         <td class="fw-semibold">${p.nombre}</td>
-        <td>${prov ? prov.empresa : 'Sin asignar'}</td>
+        <td>${prov ? `${prov.empresa} (${prov.nombre})` : '<span class="text-muted">Sin asignar</span>'}</td>
         <td>${formatoCOP(p.precio)}</td>
-        <td>${p.stock} / mín. ${p.umbralMinimo}</td>
+        <td><strong>${p.stock}</strong> / mín. ${p.umbralMinimo}</td>
         <td>${esBajo ? '<span class="badge bg-danger">Bajo Stock</span>' : '<span class="badge bg-success-subtle text-success">Óptimo</span>'}</td>
+        <td>
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-secondary" onclick="ajustarStock('${p.id}', -1)">-1</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="ajustarStock('${p.id}', 1)">+1</button>
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
 
-  // 5. Cartera y Cobro a Morosos (HU-07 / HU-08)
+  // 8. Cartera y Cobro a Morosos (HU-07 / HU-08 - Dev 3)
   const soloMorosos = document.getElementById('filtroSoloMorosos')?.checked;
   const clientesVisibles = soloMorosos
     ? window.KleinesCore.filtrarClientesMorosos(state.clientes, 7)
